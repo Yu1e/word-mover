@@ -1,0 +1,10 @@
+{
+  "id": "word-mover",
+  "name": "Word Mover",
+  "version": "1.0.0",
+  "minAppVersion": "0.15.0",
+  "description": "Moves word left or right",
+  "author": "Yule",
+  "authorUrl": "",
+  "isDesktopOnly": false
+}
