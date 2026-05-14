@@ -2,33 +2,34 @@ const { Plugin } = require('obsidian');
 
 module.exports = class SmartWordMoverPlugin extends Plugin {
     async onload() {
-        this.addCommand({
-            id: 'move-word-left',
-            name: 'Move word left',
-            editorCallback: (editor) => this.moveWord(editor, 'left'),
-        });
-        this.addCommand({
-            id: 'move-word-right',
-            name: 'Move word right',
-            editorCallback: (editor) => this.moveWord(editor, 'right'),
-        });
-        this.addCommand({
-            id: 'move-word-up',
-            name: 'Move word up',
-            editorCallback: (editor) => this.moveVertical(editor, 'up'),
-        });
-        this.addCommand({
-            id: 'move-word-down',
-            name: 'Move word down',
-            editorCallback: (editor) => this.moveVertical(editor, 'down'),
-        });
+        try {
+            this.addCommand({
+                id: 'move-word-left',
+                name: 'Move word left',
+                editorCallback: (editor) => this.moveWord(editor, 'left'),
+            });
+            this.addCommand({
+                id: 'move-word-right',
+                name: 'Move word right',
+                editorCallback: (editor) => this.moveWord(editor, 'right'),
+            });
+            this.addCommand({
+                id: 'move-word-up',
+                name: 'Move word up',
+                editorCallback: (editor) => this.moveVertical(editor, 'up'),
+            });
+            this.addCommand({
+                id: 'move-word-down',
+                name: 'Move word down',
+                editorCallback: (editor) => this.moveVertical(editor, 'down'),
+            });
+        } catch (e) {
+            console.error('SmartWordMover: failed to load', e);
+        }
     }
 
     onunload() {}
 
-    // ────────── Helpers ──────────
-
-    /** Split line into non-whitespace tokens with positions */
     tokenize(line) {
         const tokens = [];
         const re = /\S+/g;
@@ -39,13 +40,11 @@ module.exports = class SmartWordMoverPlugin extends Plugin {
         return tokens;
     }
 
-    /** Leading whitespace (indentation) */
     getIndent(line) {
         const m = line.match(/^\s*/);
         return m ? m[0] : '';
     }
 
-    /** Find the token at or nearest to cursor position */
     findTokenAt(tokens, ch) {
         let word = tokens.find(t => ch >= t.start && ch <= t.end);
         if (word) return word;
@@ -55,7 +54,6 @@ module.exports = class SmartWordMoverPlugin extends Plugin {
         return tokens[0] || null;
     }
 
-    /** Extract the fragment (word under cursor or selection) */
     getFragment(editor) {
         const sel = editor.getSelection();
         const hasSel = sel && sel.length > 0;
@@ -83,8 +81,6 @@ module.exports = class SmartWordMoverPlugin extends Plugin {
         return { lineNum, line, tokens, fragStart, fragEnd, fragText, hasSel };
     }
 
-    /** Remove the fragment from a line and rebuild with single spaces.
-     *  Returns null if the line becomes empty (should be deleted). */
     buildSourceRemainder(line, fragStart, fragEnd) {
         const indent = this.getIndent(line);
         const before = line.substring(0, fragStart).trim();
@@ -94,7 +90,6 @@ module.exports = class SmartWordMoverPlugin extends Plugin {
         return indent + rem;
     }
 
-    /** Replace a range of lines in one operation, then position cursor/selection */
     applyChange(editor, minLine, maxLine, resultLines, finalLine, newFragStart, newFragEnd, hasSel) {
         const maxLineText = editor.getLine(maxLine);
         editor.replaceRange(
@@ -112,8 +107,6 @@ module.exports = class SmartWordMoverPlugin extends Plugin {
         }
     }
 
-    // ────────── Horizontal movement (left / right) ──────────
-
     moveWord(editor, direction) {
         const frag = this.getFragment(editor);
         if (!frag) return;
@@ -129,7 +122,6 @@ module.exports = class SmartWordMoverPlugin extends Plugin {
         }
     }
 
-    /** Swap the fragment with the adjacent token on the same line */
     moveIntraLine(editor, lineNum, line, tokens, fragStart, fragEnd, fragText, dir, hasSel) {
         const indent = this.getIndent(line);
         const parts = [];
@@ -176,7 +168,6 @@ module.exports = class SmartWordMoverPlugin extends Plugin {
         }
     }
 
-    /** Move the fragment to the adjacent non-empty line (for left/right at line boundary) */
     moveCrossLine(editor, srcLine, srcText, fragStart, fragEnd, fragText, dir, hasSel) {
         const total = editor.lineCount();
         let tgtLine = -1;
@@ -236,8 +227,7 @@ module.exports = class SmartWordMoverPlugin extends Plugin {
         this.applyChange(editor, minLine, maxLine, resultLines, finalLine, newFragStart, newFragEnd, hasSel);
     }
 
-    // ────────── Vertical movement (up / down) ──────────
-
+    // ── ИСПРАВЛЕНО: идём строго на одну строку, не пропускаем пустые ──
     moveVertical(editor, direction) {
         const frag = this.getFragment(editor);
         if (!frag) return;
@@ -245,29 +235,15 @@ module.exports = class SmartWordMoverPlugin extends Plugin {
         const { lineNum, line, fragStart, fragEnd, fragText, hasSel } = frag;
         const total = editor.lineCount();
 
-        // Find nearest non-empty target line
-        let tgtLine = -1;
-        if (direction === 'up') {
-            for (let i = lineNum - 1; i >= 0; i--) {
-                if (editor.getLine(i).trim()) { tgtLine = i; break; }
-            }
-        } else {
-            for (let i = lineNum + 1; i < total; i++) {
-                if (editor.getLine(i).trim()) { tgtLine = i; break; }
-            }
-        }
-        if (tgtLine < 0) return;
+        // Строго одна строка вверх или вниз
+        const tgtLine = direction === 'up' ? lineNum - 1 : lineNum + 1;
+        if (tgtLine < 0 || tgtLine >= total) return;
 
-        // Reference column — where the fragment starts on the source line
         const refCol    = fragStart;
         const tgtText   = editor.getLine(tgtLine);
         const tgtTokens = this.tokenize(tgtText);
         const tgtIndent = this.getIndent(tgtText);
 
-        // Determine insertion index among target tokens:
-        //   - refCol at or before a token's start  → insert before that token
-        //   - refCol strictly inside a token        → insert after it (snap to end)
-        //   - refCol past all tokens                → insert at the end
         let insertIdx = tgtTokens.length;
         for (let i = 0; i < tgtTokens.length; i++) {
             if (refCol <= tgtTokens[i].start) {
@@ -280,23 +256,19 @@ module.exports = class SmartWordMoverPlugin extends Plugin {
             }
         }
 
-        // Build new target line with fragment spliced in
         const tgtParts = tgtTokens.map(t => t.text);
         tgtParts.splice(insertIdx, 0, fragText);
         const newTgtLine = tgtIndent + tgtParts.join(' ');
 
-        // Compute fragment position in the rebuilt target line
         let newFragStart = tgtIndent.length;
         for (let i = 0; i < insertIdx; i++) {
             newFragStart += tgtParts[i].length + 1;
         }
         const newFragEnd = newFragStart + fragText.length;
 
-        // Build new source line (fragment removed); null = line empty → delete
         const newSrcLine = this.buildSourceRemainder(line, fragStart, fragEnd);
         const srcEmpty = newSrcLine === null;
 
-        // Replace the whole range [min..max] in one operation (single undo step)
         const minLine = Math.min(lineNum, tgtLine);
         const maxLine = Math.max(lineNum, tgtLine);
 
@@ -306,13 +278,11 @@ module.exports = class SmartWordMoverPlugin extends Plugin {
                 resultLines.push(newTgtLine);
             } else if (i === lineNum) {
                 if (!srcEmpty) resultLines.push(newSrcLine);
-                // empty → line is deleted (skipped)
             } else {
                 resultLines.push(editor.getLine(i));
             }
         }
 
-        // If source line was above target and got deleted, target shifts up by one
         let finalLine = tgtLine;
         if (srcEmpty && lineNum < tgtLine) {
             finalLine = tgtLine - 1;
