@@ -28,7 +28,6 @@
 ### Установка
 
 - **Вручную:** скопировать `main.js` и `manifest.json` в `.obsidian/plugins/yule-word-mover/`, включить плагин в **Настройки → Сторонние плагины**.
-- **Через BRAT:** добавить репозиторий `Yu1e/word-mover`.
 
 Obsidian 0.15.0 и выше, чистый JavaScript без сборки. Лицензия MIT.
 
@@ -58,6 +57,5 @@ Hotkeys are set in **Settings → Hotkeys**. Obsidian binds `Ctrl+D` to "Delete 
 ### Installation
 
 - **Manual:** copy `main.js` and `manifest.json` to `.obsidian/plugins/yule-word-mover/`, enable the plugin in **Settings → Community plugins**.
-- **BRAT:** add the repository `Yu1e/word-mover`.
 
 Obsidian 0.15.0 or higher, plain JavaScript, no build step. MIT license.
