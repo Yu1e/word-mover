@@ -1,123 +1,63 @@
-# Word Mover / Умный переместитель слов
+# Word Mover
 
-[English](#english) | [Русский](#русский)
-
----
-
-## English
-
-**Word Mover** is an Obsidian plugin that lets you move a word or a selected text fragment one word left or right with a single keyboard shortcut. It intelligently detects which word to move based on the cursor position (inside a word, just after a word, or just before a word) and preserves exactly one space between words.
-
-### Features
-
-- **Cursor‑aware word selection** – move the word the cursor is inside, the word just before the cursor (if cursor is after a word), or the word just after the cursor (if cursor is before a word).
-- **Selection support** – if text is selected, the entire selection is moved (not limited to single words).
-- **Smart spacing** – automatically maintains a single space between words; no extra spaces are added.
-- **Two commands**:  
-  - `Move word left` – moves the word/fragment to the left (before the previous word).  
-  - `Move word right` – moves it to the right (after the next word).
-
-### Installation
-
-#### Manual installation
-
-1. Download the latest release.
-2. Extract the folder `word-mover` into your Obsidian vault’s `.obsidian/plugins/` directory.
-3. Reload Obsidian (or restart it).
-4. Enable the plugin in **Settings → Community plugins**.
-
-#### Via BRAT
-
-1. Install the **BRAT** plugin.
-2. Add this repository.
-3. Enable the plugin in **Settings → Community plugins**.
-
-### Usage
-
-After enabling the plugin, two commands are available:
-
-- **Move word left** – move the word or selection one word to the left.
-- **Move word right** – move it one word to the right.
-
-You can assign keyboard shortcuts to these commands in **Settings → Hotkeys**.
-
-#### Examples
-The quick brown fox jumps.
-^ cursor here
-
-text
-- If cursor is inside `quick`, `quick` will be moved.
-- If cursor is immediately after `quick` (before space), `quick` will be moved.
-- If cursor is immediately before `brown` (after space), `brown` will be moved.
-
-With selection:
-Select any text → press hotkey → the selected text moves left or right.
-
-### Compatibility
-
-- Obsidian v0.15.0 or higher.
-- No compilation needed – pure JavaScript.
-
-### License
-
-MIT
-
----
+[Русский](#русский) | [English](#english)
 
 ## Русский
 
-**Word Mover** — плагин для Obsidian, позволяющий перемещать слово под курсором или выделенный фрагмент на одно слово влево или вправо одной горячей клавишей. Плагин интеллектуально определяет, какое слово нужно переместить, в зависимости от положения курсора (внутри слова, сразу после слова или сразу перед словом) и сохраняет ровно один пробел между словами.
+Плагин для Obsidian. Перемещает слово под курсором или выделенный фрагмент на одно слово влево или вправо и на одну экранную строку вверх или вниз. Также дублирует и удаляет строки, удаляет слово и переключает подчёркивание.
 
-### Возможности
+### Перемещение
 
-- **Умное определение слова** – перемещается слово, на котором стоит курсор, слово перед курсором (если курсор после слова) или слово после курсора (если курсор перед словом).
-- **Поддержка выделения** – если текст выделен, перемещается весь выделенный фрагмент (не ограничиваясь одним словом).
-- **Интеллектуальные пробелы** – автоматически поддерживается один пробел между словами; лишние пробелы не добавляются.
-- **Две команды**:  
-  - `Move word left` – перемещает слово/фрагмент влево (перед предыдущим словом).  
-  - `Move word right` – перемещает вправо (после следующего слова).
+Без выделения перемещается слово, в котором стоит курсор или к которому он примыкает, с выделением — выделенный фрагмент в пределах строки. Между словами остаётся один пробел.
+
+- **Влево / вправо** — через соседнее слово. На краю строки фрагмент переходит в конец предыдущей или в начало следующей непустой строки.
+- **Вверх / вниз** — на экранную строку выше или ниже, в ближайший промежуток между словами. Учитываются переносы внутри абзаца, пустые строки пропускаются, маркеры списков, цитат и заголовков остаются на месте.
+
+### Команды
+
+| Команда | Клавиша по умолчанию | Действие |
+|---|---|---|
+| Move word left / right / up / down | — | Перемещение слова или фрагмента |
+| Duplicate line | `Ctrl+D` | Копия строки (или строк выделения) ниже |
+| Delete line (no clipboard) | — | Удаление строки без записи в буфер |
+| Delete word at cursor | — | Удаление слова под курсором с соседним пробелом |
+| Toggle underline | `Ctrl+U` | Оборачивает слово или выделение в `<u>…</u>`; внутри подчёркивания снимает его |
+
+Клавиши назначаются в **Настройки → Горячие клавиши**. `Ctrl+D` в Obsidian по умолчанию занят командой «Удалить абзац», с неё клавишу нужно снять.
 
 ### Установка
 
-#### Ручная установка
+- **Вручную:** скопировать `main.js` и `manifest.json` в `.obsidian/plugins/yule-word-mover/`, включить плагин в **Настройки → Сторонние плагины**.
+- **Через BRAT:** добавить репозиторий `Yu1e/word-mover`.
 
-1. Скачайте последнюю версию.
-2. Распакуйте папку `smart-word-mover` в каталог `.obsidian/plugins/` вашего хранилища Obsidian.
-3. Перезагрузите Obsidian.
-4. Включите плагин в **Настройки → Сторонние плагины**.
+Obsidian 0.15.0 и выше, чистый JavaScript без сборки. Лицензия MIT.
 
-#### Через BRAT
+## English
 
-1. Установите плагин **BRAT**.
-2. Добавьте репозиторий.
-3. Включите плагин в настройках.
+An Obsidian plugin. Moves the word under the cursor or the selected fragment one word left or right and one visual line up or down. Also duplicates and deletes lines, deletes a word and toggles underline.
 
-### Использование
+### Moving
 
-После включения плагина появятся две команды:
+Without a selection, the word containing or touching the cursor is moved; with a selection, the selected fragment within the line. Words stay separated by a single space.
 
-- **Move word left** – переместить слово или выделение на одно слово влево.
-- **Move word right** – переместить на одно слово вправо.
+- **Left / right** — past the neighbouring word. At the line edge the fragment goes to the end of the previous or the start of the next non-empty line.
+- **Up / down** — to the visual line above or below, into the nearest gap between words. Wrapped lines are respected, empty lines are skipped, list, quote and heading markers stay in place.
 
-Вы можете назначить горячие клавиши на эти команды в **Настройки → Горячие клавиши**.
+### Commands
 
-#### Примеры
-The quick brown fox jumps.
-^ курсор здесь
+| Command | Default hotkey | Action |
+|---|---|---|
+| Move word left / right / up / down | — | Move the word or fragment |
+| Duplicate line | `Ctrl+D` | Copy the line (or selected lines) below |
+| Delete line (no clipboard) | — | Delete the line without touching the clipboard |
+| Delete word at cursor | — | Delete the word at the cursor with an adjacent space |
+| Toggle underline | `Ctrl+U` | Wrap the word or selection in `<u>…</u>`; inside an underline, remove it |
 
-text
-- Если курсор внутри слова `quick`, будет перемещено `quick`.
-- Если курсор сразу после `quick` (перед пробелом), будет перемещено `quick`.
-- Если курсор сразу перед `brown` (после пробела), будет перемещено `brown`.
+Hotkeys are set in **Settings → Hotkeys**. Obsidian binds `Ctrl+D` to "Delete paragraph" by default; remove that binding.
 
-С выделением:
-Выделите любой текст → нажмите горячую клавишу → выделенный текст переместится влево или вправо.
+### Installation
 
-### Совместимость
+- **Manual:** copy `main.js` and `manifest.json` to `.obsidian/plugins/yule-word-mover/`, enable the plugin in **Settings → Community plugins**.
+- **BRAT:** add the repository `Yu1e/word-mover`.
 
-- Obsidian версии 0.15.0 и выше.
-- Не требует компиляции – чистый JavaScript.
-
-### Лицензия
-
-MIT
+Obsidian 0.15.0 or higher, plain JavaScript, no build step. MIT license.
