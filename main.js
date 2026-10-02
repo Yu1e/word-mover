@@ -1,7 +1,19 @@
 const { Plugin } = require('obsidian');
 
+let EditorSelection = null;
+try {
+	({ EditorSelection } = require('@codemirror/state'));
+} catch (e) {
+	EditorSelection = null;
+}
+
+const WORD_RE = /[\p{L}\p{N}_]+(?:['’\-][\p{L}\p{N}_]+)*/gu;
+const PREFIX_RE = /^[ \t]*(?:>[ \t]?)*(?:#{1,6}[ \t]+|(?:[-*+]|\d+[.)])[ \t]+(?:\[[^\]]\][ \t]+)?)?/;
+const U_RE = /<u>([\s\S]*?)<\/u>/gi;
+
 module.exports = class SmartWordMoverPlugin extends Plugin {
 	async onload() {
+		this.lastVertical = null;
 		try {
 			this.addCommand({
 				id: 'move-word-left',
@@ -22,6 +34,28 @@ module.exports = class SmartWordMoverPlugin extends Plugin {
 				id: 'move-word-down',
 				name: 'Move word down',
 				editorCallback: (editor) => this.moveVertical(editor, 'down'),
+			});
+			this.addCommand({
+				id: 'duplicate-line',
+				name: 'Duplicate line',
+				hotkeys: [{ modifiers: ['Mod'], key: 'd' }],
+				editorCallback: (editor) => this.duplicateLine(editor),
+			});
+			this.addCommand({
+				id: 'delete-line',
+				name: 'Delete line (no clipboard)',
+				editorCallback: (editor) => this.deleteLine(editor),
+			});
+			this.addCommand({
+				id: 'delete-word',
+				name: 'Delete word at cursor',
+				editorCallback: (editor) => this.deleteWord(editor),
+			});
+			this.addCommand({
+				id: 'toggle-underline',
+				name: 'Toggle underline',
+				hotkeys: [{ modifiers: ['Mod'], key: 'u' }],
+				editorCallback: (editor) => this.toggleUnderline(editor),
 			});
 		} catch (e) {
 			console.error('SmartWordMover: failed to load', e);
@@ -45,6 +79,11 @@ module.exports = class SmartWordMoverPlugin extends Plugin {
 		return m ? m[0] : '';
 	}
 
+	prefixEnd(line) {
+		const m = line.match(PREFIX_RE);
+		return m ? m[0].length : 0;
+	}
+
 	findTokenAt(tokens, ch) {
 		let word = tokens.find(t => ch >= t.start && ch <= t.end);
 		if (word) return word;
@@ -52,6 +91,25 @@ module.exports = class SmartWordMoverPlugin extends Plugin {
 			if (tokens[i].end <= ch) return tokens[i];
 		}
 		return tokens[0] || null;
+	}
+
+	findWordAt(line, ch) {
+		WORD_RE.lastIndex = 0;
+		let m;
+		while ((m = WORD_RE.exec(line)) !== null) {
+			const start = m.index, end = m.index + m[0].length;
+			if (ch >= start && ch <= end) return { start, end, text: m[0] };
+			if (start > ch) break;
+		}
+		return null;
+	}
+
+	getLineSpan(editor) {
+		const from = editor.getCursor('from');
+		const to = editor.getCursor('to');
+		let last = to.line;
+		if (to.line > from.line && to.ch === 0) last--;
+		return { first: from.line, last };
 	}
 
 	getFragment(editor) {
@@ -227,15 +285,146 @@ module.exports = class SmartWordMoverPlugin extends Plugin {
 		this.applyChange(editor, minLine, maxLine, resultLines, finalLine, newFragStart, newFragEnd, hasSel);
 	}
 
-	// ── ИСПРАВЛЕНО: идём строго на одну строку, не пропускаем пустые ──
+	// ── Вертикальное перемещение по экранным строкам ──
 	moveVertical(editor, direction) {
+		const view = editor.cm;
+		if (!view || !EditorSelection || typeof view.moveVertically !== 'function') {
+			return this.moveVerticalByLine(editor, direction);
+		}
+
+		const frag = this.getFragment(editor);
+		if (!frag) return;
+		const { lineNum, fragStart, fragEnd, fragText, hasSel } = frag;
+
+		const doc = view.state.doc;
+		const srcLine = doc.line(lineNum + 1);
+		const fs = srcLine.from + fragStart;
+		const fe = srcLine.from + fragEnd;
+		const forward = direction === 'down';
+
+		const startCoords = view.coordsAtPos(fs, 1);
+		if (!startCoords) return this.moveVerticalByLine(editor, direction);
+
+		const contentLeft = view.contentDOM.getBoundingClientRect().left;
+		let goalX = startCoords.left;
+		const lv = this.lastVertical;
+		if (lv && lv.view === view && lv.pos === fs && lv.docLen === doc.length) {
+			goalX = contentLeft + lv.goalRel;
+		}
+
+		// Экранная строка выше/ниже; пустые строки пропускаются
+		let cur = EditorSelection.cursor(forward ? fe : fs, forward ? -1 : 1);
+		let land = null;
+		for (let guard = 0; guard < 1000; guard++) {
+			const next = view.moveVertically(cur, forward);
+			if (next.head === cur.head) break;
+			if (doc.lineAt(next.head).text.trim()) { land = next; break; }
+			cur = next;
+		}
+		if (!land) return;
+
+		const landRect = view.coordsAtPos(land.head, land.assoc || 1)
+			|| view.coordsAtPos(land.head, -(land.assoc || 1));
+		if (!landRect) return;
+		const landMid = (landRect.top + landRect.bottom) / 2;
+
+		const tLine = doc.lineAt(land.head);
+		const tText = tLine.text;
+		const tTokens = this.tokenize(tText);
+		const pre = this.prefixEnd(tText);
+		const sameLine = tLine.number === srcLine.number;
+
+		const touches = (p) => {
+			if (!sameLine) return false;
+			if (p >= fs && p <= fe) return true;
+			if (p < fs) return !doc.sliceString(p, fs).trim();
+			return !doc.sliceString(fe, p).trim();
+		};
+
+		const cands = [];
+		for (const t of tTokens) {
+			if (t.start >= pre) cands.push({ p: tLine.from + t.start, before: true, side: 1 });
+			if (t.end > pre) cands.push({ p: tLine.from + t.end, before: false, side: -1 });
+		}
+
+		let bestRow = null, bestAny = null;
+		for (const c of cands) {
+			if (touches(c.p)) continue;
+			const r = view.coordsAtPos(c.p, c.side);
+			if (!r) continue;
+			const mid = (r.top + r.bottom) / 2;
+			const dx = Math.abs(r.left - goalX);
+			const onRow = mid >= landRect.top && mid <= landRect.bottom;
+			if (onRow && (!bestRow || dx < bestRow.dx)) bestRow = { ...c, dx };
+			const score = Math.abs(mid - landMid) * 1000 + dx;
+			if (!bestAny || score < bestAny.score) bestAny = { ...c, score };
+		}
+		const target = bestRow || bestAny;
+		if (!target) return;
+
+		const rem = this.computeRemoval(doc, srcLine, fs, fe);
+		const ins = target.before ? fragText + ' ' : ' ' + fragText;
+		const changes = [
+			{ from: rem.from, to: rem.to, insert: '' },
+			{ from: target.p, insert: ins },
+		].sort((a, b) => a.from - b.from);
+
+		const delta = rem.to <= target.p ? rem.to - rem.from : 0;
+		const ns = target.p - delta + (target.before ? 0 : 1);
+		const ne = ns + fragText.length;
+
+		view.dispatch({
+			changes,
+			selection: hasSel ? EditorSelection.single(ns, ne) : EditorSelection.cursor(ne),
+			scrollIntoView: true,
+			userEvent: 'move.word',
+		});
+
+		this.lastVertical = {
+			view,
+			pos: ns,
+			docLen: view.state.doc.length,
+			goalRel: goalX - contentLeft,
+		};
+	}
+
+	// Что удалить в исходной строке: фрагмент и один соседний пробельный промежуток
+	computeRemoval(doc, line, fs, fe) {
+		const text = line.text;
+		const ws = (c) => c === ' ' || c === '\t';
+		let a = fs - line.from;
+		let b = fe - line.from;
+		const leftWS = a === 0 || ws(text[a - 1]);
+		const rightWS = b === text.length || ws(text[b]);
+
+		if (leftWS && rightWS) {
+			let b2 = b;
+			while (b2 < text.length && ws(text[b2])) b2++;
+			if (b2 < text.length) {
+				b = b2;
+			} else {
+				while (a > 0 && ws(text[a - 1])) a--;
+				b = text.length;
+			}
+		}
+
+		const rest = text.slice(0, a) + text.slice(b);
+		if (!rest.trim()) {
+			if (line.number < doc.lines) return { from: line.from, to: line.to + 1 };
+			if (line.number > 1) return { from: line.from - 1, to: line.to };
+			return { from: line.from, to: line.to };
+		}
+		return { from: line.from + a, to: line.from + b };
+	}
+
+	// Запасной вариант без CodeMirror: строго одна строка документа
+	moveVerticalByLine(editor, direction) {
 		const frag = this.getFragment(editor);
 		if (!frag) return;
 
 		const { lineNum, line, fragStart, fragEnd, fragText, hasSel } = frag;
 		const total = editor.lineCount();
 
-		// Строго одна строка вверх или вниз
 		const tgtLine = direction === 'up' ? lineNum - 1 : lineNum + 1;
 		if (tgtLine < 0 || tgtLine >= total) return;
 
@@ -289,5 +478,132 @@ module.exports = class SmartWordMoverPlugin extends Plugin {
 		}
 
 		this.applyChange(editor, minLine, maxLine, resultLines, finalLine, newFragStart, newFragEnd, hasSel);
+	}
+
+	// ── Строки и слова ──
+	duplicateLine(editor) {
+		const anchor = editor.getCursor('anchor');
+		const head = editor.getCursor('head');
+		const { first, last } = this.getLineSpan(editor);
+
+		const lines = [];
+		for (let i = first; i <= last; i++) lines.push(editor.getLine(i));
+
+		editor.replaceRange('\n' + lines.join('\n'), { line: last, ch: editor.getLine(last).length });
+
+		const shift = last - first + 1;
+		editor.setSelection(
+			{ line: anchor.line + shift, ch: anchor.ch },
+			{ line: head.line + shift, ch: head.ch },
+		);
+	}
+
+	deleteLine(editor) {
+		const { first, last } = this.getLineSpan(editor);
+		const total = editor.lineCount();
+		const ch = editor.getCursor('head').ch;
+
+		let from, to;
+		if (last < total - 1) {
+			from = { line: first, ch: 0 };
+			to = { line: last + 1, ch: 0 };
+		} else if (first > 0) {
+			from = { line: first - 1, ch: editor.getLine(first - 1).length };
+			to = { line: last, ch: editor.getLine(last).length };
+		} else {
+			from = { line: 0, ch: 0 };
+			to = { line: last, ch: editor.getLine(last).length };
+		}
+		editor.replaceRange('', from, to);
+
+		const nl = Math.min(first, editor.lineCount() - 1);
+		editor.setCursor({ line: nl, ch: Math.min(ch, editor.getLine(nl).length) });
+	}
+
+	deleteWord(editor) {
+		if (editor.somethingSelected()) {
+			editor.replaceSelection('');
+			return;
+		}
+		const cur = editor.getCursor();
+		const text = editor.getLine(cur.line);
+		const w = this.findWordAt(text, cur.ch);
+		if (!w) return;
+
+		const ws = (c) => c === ' ' || c === '\t';
+		let a = w.start, b = w.end;
+
+		const eatBack = () => {
+			let a2 = a;
+			while (a2 > 0 && ws(text[a2 - 1])) a2--;
+			if (a2 > 0) a = a2;
+		};
+
+		if (b < text.length && ws(text[b])) {
+			while (b < text.length && ws(text[b])) b++;
+			if (b === text.length) eatBack();
+		} else if (a > 0 && ws(text[a - 1])) {
+			eatBack();
+		}
+
+		editor.replaceRange('', { line: cur.line, ch: a }, { line: cur.line, ch: b });
+		editor.setCursor({ line: cur.line, ch: a });
+	}
+
+	// ── Подчёркивание ──
+	toggleUnderline(editor) {
+		const from = editor.getCursor('from');
+		const to = editor.getCursor('to');
+
+		if (from.line === to.line) {
+			const line = editor.getLine(from.line);
+			U_RE.lastIndex = 0;
+			let m;
+			while ((m = U_RE.exec(line)) !== null) {
+				const s = m.index, e = m.index + m[0].length;
+				if (from.ch >= s && to.ch <= e) {
+					this.unwrapUnderline(editor, from.line, s, e, m[1]);
+					return;
+				}
+				if (s > to.ch) break;
+			}
+		}
+
+		if (editor.somethingSelected()) {
+			const sel = editor.getSelection();
+			editor.replaceSelection('<u>' + sel + '</u>');
+			const endCh = to.ch + (from.line === to.line ? 3 : 0);
+			editor.setSelection({ line: from.line, ch: from.ch + 3 }, { line: to.line, ch: endCh });
+			return;
+		}
+
+		const line = editor.getLine(from.line);
+		const w = this.findWordAt(line, from.ch);
+		if (w) {
+			editor.replaceRange('<u>' + w.text + '</u>',
+				{ line: from.line, ch: w.start }, { line: from.line, ch: w.end });
+			editor.setCursor({ line: from.line, ch: from.ch + 3 });
+		} else {
+			editor.replaceRange('<u></u>', from);
+			editor.setCursor({ line: from.line, ch: from.ch + 3 });
+		}
+	}
+
+	unwrapUnderline(editor, lineNum, s, e, inner) {
+		const anchor = editor.getCursor('anchor');
+		const head = editor.getCursor('head');
+		const innerEnd = e - 4;
+		const map = (ch) => {
+			if (ch <= s) return ch;
+			if (ch <= s + 3) return s;
+			if (ch <= innerEnd) return ch - 3;
+			if (ch <= e) return innerEnd - 3;
+			return ch - 7;
+		};
+		editor.replaceRange(inner, { line: lineNum, ch: s }, { line: lineNum, ch: e });
+		editor.setSelection(
+			{ line: anchor.line, ch: map(anchor.ch) },
+			{ line: head.line, ch: map(head.ch) },
+		);
 	}
 };
